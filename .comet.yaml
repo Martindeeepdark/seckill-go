@@ -1,2 +1,0 @@
-build_command: make build
-verify_command: make test
