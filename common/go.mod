@@ -3,7 +3,7 @@ module seckill-common
 go 1.25.0
 
 require (
-	github.com/Martindeeepdark/go-common v0.0.0
+	github.com/Martindeeepdark/go-common v0.0.0-20260621125950-44fa310e1cf9
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/go-kratos/aegis v0.2.0
 	github.com/go-kratos/kratos/v2 v2.9.2

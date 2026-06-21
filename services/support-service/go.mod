@@ -3,7 +3,7 @@ module seckill-support-service
 go 1.25.0
 
 require (
-	github.com/Martindeeepdark/go-common v0.0.0
+	github.com/Martindeeepdark/go-common v0.0.0-20260621125950-44fa310e1cf9
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/nats-io/nats.go v1.52.0
 	google.golang.org/grpc v1.81.1
@@ -60,7 +60,6 @@ require (
 )
 
 replace (
-	github.com/Martindeeepdark/go-common => /Users/wenyz/GolandProjects/common
 	seckill-api => ../../api
 	seckill-common => ../../common
 )

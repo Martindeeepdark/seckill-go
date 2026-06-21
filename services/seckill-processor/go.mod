@@ -3,7 +3,7 @@ module seckill-processor-service
 go 1.25.0
 
 require (
-	github.com/Martindeeepdark/go-common v0.0.0
+	github.com/Martindeeepdark/go-common v0.0.0-20260621125950-44fa310e1cf9
 	github.com/go-kratos/kratos/v2 v2.9.2
 	github.com/nats-io/nats.go v1.52.0
 	github.com/redis/go-redis/v9 v9.20.0
@@ -56,7 +56,6 @@ require (
 )
 
 replace (
-	github.com/Martindeeepdark/go-common => /Users/wenyz/GolandProjects/common
 	seckill-api => ../../api
 	seckill-common => ../../common
 )

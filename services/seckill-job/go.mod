@@ -3,7 +3,7 @@ module seckill-job-service
 go 1.25.0
 
 require (
-	github.com/Martindeeepdark/go-common v0.0.0
+	github.com/Martindeeepdark/go-common v0.0.0-20260621125950-44fa310e1cf9
 	github.com/go-kratos/aegis v0.2.0
 	github.com/go-kratos/kratos/v2 v2.9.2
 	google.golang.org/grpc v1.81.1
@@ -49,7 +49,6 @@ require (
 )
 
 replace (
-	github.com/Martindeeepdark/go-common => /Users/wenyz/GolandProjects/common
 	seckill-api => ../../api
 	seckill-common => ../../common
 )
