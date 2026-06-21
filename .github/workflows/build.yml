@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.25'
+        go-version: '1.24'
 
     - name: Configure Go to bypass proxy for private modules
       run: go env -w GOPRIVATE=github.com/Martindeeepdark/*
@@ -35,6 +35,14 @@ jobs:
 
     - name: Generate proto files
       run: make api
+
+    - name: Download dependencies
+      run: |
+        cd api && go mod download && go mod tidy
+        cd ../common && go mod download && go mod tidy
+        for dir in services/*/; do
+          (cd "$dir" && go mod download && go mod tidy)
+        done
 
     - name: Build services
       run: make build
