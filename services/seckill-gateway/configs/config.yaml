@@ -1,0 +1,101 @@
+services:
+  seckill-gateway:
+    http:
+      addr: 0.0.0.0:8080
+
+data:
+  redis:
+    addr: 127.0.0.1:6379
+    password: ""
+    db: 0
+
+mq:
+  type: nats
+  nats:
+    url: nats://127.0.0.1:4222
+    stream: SECKILL
+    subject: seckill.order.part_in
+    post_pay_subject: seckill.post_pay
+
+rpc:
+  activity: discovery:///activity-service
+  stock: discovery:///stock-service
+  risk: discovery:///risk-service
+  order: discovery:///order-service
+  payment: discovery:///support-service
+  timeout: 3s
+  circuit_breaker:
+    enabled: true
+
+discovery:
+  mode: redis
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - 127.0.0.1:9001
+    stock-service:
+      - 127.0.0.1:9002
+    risk-service:
+      - 127.0.0.1:9003
+    order-service:
+      - 127.0.0.1:9004
+    support-service:
+      - 127.0.0.1:9005
+  advertise:
+    activity-service: 127.0.0.1:9001
+    stock-service: 127.0.0.1:9002
+    risk-service: 127.0.0.1:9003
+    order-service: 127.0.0.1:9004
+    support-service: 127.0.0.1:9005
+
+gateway:
+  machine_check:
+    enabled: false
+    mode: java
+    secret: ""
+    random_length: 16
+    ttl: 30s
+  rate_limit:
+    enabled: false
+    max_qps: 100
+    rules:
+      - resource: POST /api/seckill/part-in
+        count: 1000
+        interval: 1s
+      - resource: GET /api/activities
+        count: 200
+        interval: 1s
+      - resource: GET /api/seckill/activity/:activityNo
+        count: 500
+        interval: 1s
+    user_enabled: true
+    user_rate: 10
+    user_interval: 10s
+    user_expire: 5m
+  risk:
+    enabled: true
+  degrade:
+    enabled: false
+    failure_threshold: 5
+    timeout: 10s
+  cache:
+    refresh_interval: 30s
+    detail:
+      local_ttl: 5m
+      shards: 16
+      max_entries: 256
+    list:
+      local_ttl: 5m
+      shards: 4
+      max_entries: 4
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: 127.0.0.1:4317
+  insecure: true

@@ -1,0 +1,61 @@
+-- +migrate Up
+-- ============================================================================
+-- sk_order (user_id, trace_id) partial UNIQUE INDEX
+-- ============================================================================
+-- 目的: 为秒杀订单创建链路提供 Layer 2 兜底幂等:
+--   即使 Redis Layer 1 (processor idem key) 失效, 重复 (user_id, trace_id) 组合
+--   INSERT 也会抛出 PostgreSQL unique_violation (23505), processor 捕获后通过
+--   GetByUserAndTrace 回查已存在订单, 避免重复扣库存.
+--
+-- 实现发现: sk_order 是 PARTITION BY HASH(user_id) 分区表, PostgreSQL 强制要求
+--   分区父表上的 UNIQUE INDEX 必须包含分区键 (user_id). 同时这契合幂等场景——
+--   重复 traceId 必然来自同一 user_id (消息重投/崩溃恢复).
+--
+-- 为什么 partial INDEX (WHERE trace_id != ''):
+--   历史数据 trace_id 可能是 NULL 或 '', partial INDEX 允许这些行存在,
+--   仅对非空 trace_id 强制唯一. 新代码 INSERT 必须传非空 trace_id.
+--
+-- ============================================================================
+-- ⚠️ 运维手动执行的清理脚本 (仅在迁移前发现重复时执行, 避免误操作)
+-- ============================================================================
+-- 1. 扫描重复 (user_id, trace_id) 组合:
+--    SELECT user_id, trace_id, COUNT(*) AS dup_cnt
+--    FROM sk_order
+--    WHERE trace_id IS NOT NULL AND trace_id != ''
+--    GROUP BY user_id, trace_id
+--    HAVING COUNT(*) > 1;
+--
+-- 2. 对每个重复 (user_id, trace_id), 保留 MIN(created_at) 的订单, 其余 trace_id 置空:
+--    UPDATE sk_order
+--    SET trace_id = ''
+--    WHERE trace_id IS NOT NULL AND trace_id != ''
+--      AND (user_id, trace_id, created_at) NOT IN (
+--        SELECT user_id, trace_id, MIN(created_at)
+--        FROM sk_order
+--        WHERE trace_id IS NOT NULL AND trace_id != ''
+--        GROUP BY user_id, trace_id
+--        HAVING COUNT(*) > 1
+--      )
+--      AND (user_id, trace_id) IN (
+--        SELECT user_id, trace_id
+--        FROM sk_order
+--        WHERE trace_id IS NOT NULL AND trace_id != ''
+--        GROUP BY user_id, trace_id
+--        HAVING COUNT(*) > 1
+--      );
+--
+-- 3. 验证清理后无重复:
+--    SELECT user_id, trace_id, COUNT(*) FROM sk_order
+--    WHERE trace_id IS NOT NULL AND trace_id != ''
+--    GROUP BY user_id, trace_id HAVING COUNT(*) > 1;
+--    -- 应返回 0 行
+-- ============================================================================
+
+-- 创建 (user_id, trace_id) partial UNIQUE INDEX (含分区键, 满足 PostgreSQL 分区约束)
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sk_order_user_trace
+    ON sk_order(user_id, trace_id)
+    WHERE trace_id IS NOT NULL AND trace_id != '';
+
+-- +migrate Down
+-- 删除索引 (回滚, 业务无影响)
+DROP INDEX IF EXISTS uk_sk_order_user_trace;

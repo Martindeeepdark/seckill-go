@@ -1,0 +1,21 @@
+# IDE
+.idea/
+
+# OS
+.DS_Store
+
+# Worktrees
+.worktrees/
+
+# Build output
+/bin/
+/tmp/
+
+# Test
+*.test
+*.out
+
+# Development artifacts
+.claude/
+docs/superpowers/
+openspec/

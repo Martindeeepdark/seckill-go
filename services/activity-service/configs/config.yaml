@@ -1,0 +1,43 @@
+services:
+  activity-service:
+    grpc:
+      addr: 0.0.0.0:9001
+
+data:
+  redis:
+    addr: 127.0.0.1:6379
+    password: ""
+    db: 0
+
+discovery:
+  mode: redis
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - 127.0.0.1:9001
+  advertise:
+    activity-service: 127.0.0.1:9001
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: 127.0.0.1:4317
+  insecure: true
+
+cache:
+  activity:
+    enabled: true
+    max_size: 512
+    local_ttl: 30m
+    refresh_after: 5s
+    redis_ttl: 30m
+    null_ttl: 60s
+    warmup_ahead: 10m
+    refresh_enabled: true
+    refresh_initial: 30s
+    refresh_tick: 60s

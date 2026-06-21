@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package seckill.api.order;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "seckill-api/order/v1;v1";
+
+service OrderService {
+  rpc CreateOrder(OrderResponse) returns (google.protobuf.Empty);
+  rpc GetOrder(OrderNoRequest) returns (OrderResponse);
+  rpc GetOrderByUserAndTrace(GetOrderByUserAndTraceRequest) returns (OrderResponse);
+  rpc ListOrdersByActivity(OrderListByActivityRequest) returns (OrderListResponse);
+  rpc ListOrdersByActivities(OrderListByActivitiesRequest) returns (OrderListByActivitiesResponse);
+  rpc ListOrdersByUser(OrderListByUserRequest) returns (OrderListResponse);
+  rpc MarkPaid(MarkOrderPaidRequest) returns (google.protobuf.Empty);
+  rpc CloseOrder(OrderNoRequest) returns (google.protobuf.Empty);
+}
+
+message Order {
+  string order_no = 1;
+  int64 user_id = 2;
+  string activity_no = 3;
+  string sku_no = 4;
+  int64 quantity = 5;
+  int64 pay_amount = 6;
+  string status = 7;
+  string trace_id = 8;
+  string transaction_no = 9;
+  google.protobuf.Timestamp paid_at = 10;
+  google.protobuf.Timestamp closed_at = 11;
+  google.protobuf.Timestamp created_at = 12;
+  string request_trace_id = 13;
+}
+
+message OrderNoRequest {
+  string order_no = 1;
+}
+
+message OrderNosRequest {
+  repeated string order_nos = 1;
+}
+
+message OrderListByActivityRequest {
+  string activity_no = 1;
+}
+
+message OrderListByActivitiesRequest {
+  repeated string activity_nos = 1;
+}
+
+message OrderListByUserRequest {
+  int64 user_id = 1;
+}
+
+message OrderResponse {
+  Order order = 1;
+}
+
+message OrderListResponse {
+  repeated Order orders = 1;
+}
+
+message OrdersByActivity {
+  string activity_no = 1;
+  repeated Order orders = 2;
+}
+
+message OrderListByActivitiesResponse {
+  repeated OrdersByActivity items = 1;
+}
+
+message MarkOrderPaidRequest {
+  string order_no = 1;
+  string transaction_no = 2;
+  google.protobuf.Timestamp paid_at = 3;
+}
+
+message GetOrderByUserAndTraceRequest {
+  int64 user_id = 1;
+  string trace_id = 2;
+}

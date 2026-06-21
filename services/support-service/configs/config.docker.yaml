@@ -1,0 +1,49 @@
+services:
+  support-service:
+    grpc:
+      addr: 0.0.0.0:9005
+
+data:
+  redis:
+    addr: redis:6379
+    password: ""
+    db: 0
+  postgres:
+    host: postgres
+    port: 5432
+    user: seckill
+    password: seckill123
+    database: seckill_support
+  nats:
+    addr: nats://nats:4222
+
+discovery:
+  mode: etcd
+  etcd:
+    endpoints:
+      - etcd:2379
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - activity-service:9001
+    stock-service:
+      - stock-service:9002
+    risk-service:
+      - risk-service:9003
+    order-service:
+      - order-service:9004
+    support-service:
+      - support-service:9005
+  advertise:
+    support-service: support-service:9005
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: otel-collector:4317
+  insecure: true

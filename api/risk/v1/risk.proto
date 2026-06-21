@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package seckill.api.risk;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "api/activity/v1/activity.proto";
+import "api/common/v1/common.proto";
+
+option go_package = "seckill-api/risk/v1;v1";
+
+service RiskService {
+  rpc MarkSuspicious(RiskMarkRequest) returns (google.protobuf.Empty);
+  rpc Evaluate(RiskEvaluateRequest) returns (RiskEvaluationResponse);
+  rpc RecordAction(RiskRecordRequest) returns (google.protobuf.Empty);
+  rpc IsRiskUser(RiskUserRequest) returns (common.BoolResponse);
+  rpc CleanupExpiredRiskUsers(google.protobuf.Empty) returns (RiskCleanupResponse);
+}
+
+message RiskEvaluation {
+  bool risk = 1;
+  int64 level = 2;
+  string reason = 3;
+}
+
+message RiskRecord {
+  int64 user_id = 1;
+  string action_type = 2;
+  int64 risk_level = 3;
+  string request_ip = 4;
+  string request_info = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message RiskMarkRequest {
+  activity.Activity activity = 1;
+  int64 user_id = 2;
+  string request_ip = 3;
+}
+
+message RiskUserRequest {
+  int64 user_id = 1;
+}
+
+message RiskEvaluateRequest {
+  int64 user_id = 1;
+  string request_ip = 2;
+}
+
+message RiskEvaluationResponse {
+  RiskEvaluation evaluation = 1;
+}
+
+message RiskRecordRequest {
+  RiskRecord record = 1;
+}
+
+message RiskCleanupResponse {
+  int64 deleted = 1;
+}

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package seckill.api.member;
+
+import "api/common/v1/common.proto";
+
+option go_package = "seckill-api/member/v1;v1";
+
+service MemberService {
+  rpc GetUserByID(common.UserIDRequest) returns (UserResponse);
+  rpc GetUserByPhone(PhoneRequest) returns (UserResponse);
+  rpc GetMemberLevel(common.UserIDRequest) returns (MemberLevelResponse);
+}
+
+message User {
+  int64 id = 1;
+  string username = 2;
+  string phone = 3;
+  string nickname = 4;
+  string avatar = 5;
+  int64 member_level = 6;
+  int64 status = 7;
+}
+
+message PhoneRequest {
+  string phone = 1;
+}
+
+message UserResponse {
+  User user = 1;
+}
+
+message MemberLevelResponse {
+  int64 member_level = 1;
+}

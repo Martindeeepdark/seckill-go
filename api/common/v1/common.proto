@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package seckill.api.common;
+
+option go_package = "seckill-api/common/v1;v1";
+
+message UserIDRequest {
+  int64 user_id = 1;
+}
+
+message BoolResponse {
+  bool ok = 1;
+}

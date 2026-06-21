@@ -1,0 +1,64 @@
+services:
+  risk-service:
+    grpc:
+      addr: 0.0.0.0:9003
+
+data:
+  redis:
+    addr: redis:6379
+    password: ""
+    db: 0
+  postgres:
+    host: postgres
+    port: 5432
+    user: seckill
+    password: seckill123
+    database: seckill_risk
+
+discovery:
+  mode: etcd
+  etcd:
+    endpoints:
+      - etcd:2379
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - activity-service:9001
+    stock-service:
+      - stock-service:9002
+    risk-service:
+      - risk-service:9003
+    order-service:
+      - order-service:9004
+    support-service:
+      - support-service:9005
+  advertise:
+    risk-service: risk-service:9003
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: otel-collector:4317
+  insecure: true
+
+black_list:
+  enabled: true
+  mark_start_before: "300s"
+  mark_end_before: "10s"
+  expire_after: "300s"
+
+risk:
+  high_risk_threshold: 10
+  risk_user_ttl: "24h"
+  recent_window: "1h"
+  high_risk_window: "24h"
+  cache:
+    risk:
+      local_ttl: 60s
+      shards: 16
+      max_entries: 2048

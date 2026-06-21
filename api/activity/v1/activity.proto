@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package seckill.api.activity;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "seckill-api/activity/v1;v1";
+
+service ActivityService {
+  rpc ListActivities(google.protobuf.Empty) returns (ActivityListResponse);
+  rpc GetActivity(ActivityNoRequest) returns (ActivityResponse);
+  rpc GetSKU(SKURequest) returns (SKUResponse);
+  rpc CreateActivity(ActivityResponse) returns (ActivityResponse);
+  rpc UpdateActivity(ActivityResponse) returns (google.protobuf.Empty);
+  rpc UpdateActivityStatus(ActivityStatusRequest) returns (google.protobuf.Empty);
+  rpc AddActivitySKU(ActivitySKURequest) returns (google.protobuf.Empty);
+  rpc RemoveActivitySKU(SKURequest) returns (google.protobuf.Empty);
+}
+
+message Activity {
+  string activity_no = 1;
+  string name = 2;
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+  int64 status = 5;
+  int64 purchase_limit = 6;
+  string remark = 7;
+  repeated SKU skus = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message SKU {
+  string activity_no = 1;
+  string sku_no = 2;
+  string product_name = 3;
+  string product_image = 4;
+  int64 original_price = 5;
+  int64 seckill_price = 6;
+  int64 total_stock = 7;
+  int64 limit_quantity = 8;
+  int64 discount_type = 9;
+  int64 discount_price = 10;
+  int64 discount_percent = 11;
+}
+
+message ActivityNoRequest {
+  string activity_no = 1;
+}
+
+message SKURequest {
+  string activity_no = 1;
+  string sku_no = 2;
+}
+
+message ActivityListResponse {
+  repeated Activity activities = 1;
+}
+
+message ActivityResponse {
+  Activity activity = 1;
+}
+
+message ActivityStatusRequest {
+  string activity_no = 1;
+  int64 status = 2;
+}
+
+message SKUResponse {
+  SKU sku = 1;
+}
+
+message ActivitySKURequest {
+  string activity_no = 1;
+  SKU sku = 2;
+}

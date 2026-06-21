@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package seckill.api.stock;
+
+import "google/protobuf/empty.proto";
+import "api/activity/v1/activity.proto";
+import "api/common/v1/common.proto";
+
+option go_package = "seckill-api/stock/v1;v1";
+
+service StockService {
+  rpc Peek(activity.SKURequest) returns (StockResponse);
+  rpc Deduct(DeductRequest) returns (common.BoolResponse);
+  rpc Release(ReleaseRequest) returns (google.protobuf.Empty);
+  rpc CleanupActivity(StockCleanupRequest) returns (StockCleanupResponse);
+  rpc CleanupActivityPurchases(ActivityPurchaseCleanupRequest) returns (StockCleanupResponse);
+}
+
+message StockResponse {
+  int64 stock = 1;
+}
+
+message DeductRequest {
+  string activity_no = 1;
+  string sku_no = 2;
+  int64 user_id = 3;
+  int64 quantity = 4;
+  int64 purchase_limit = 5;
+  string order_no = 6;
+}
+
+message ReleaseRequest {
+  string activity_no = 1;
+  string sku_no = 2;
+  int64 user_id = 3;
+  int64 quantity = 4;
+  string order_no = 5;
+}
+
+message StockCleanupRequest {
+  string activity_no = 1;
+  repeated string sku_nos = 2;
+}
+
+message StockCleanupResponse {
+  int64 deleted = 1;
+}
+
+message ActivityPurchaseCleanupRequest {
+  string activity_no = 1;
+}

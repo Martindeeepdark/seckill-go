@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package seckill.api.payment;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "api/order/v1/order.proto";
+
+option go_package = "seckill-api/payment/v1;v1";
+
+service PaymentService {
+  rpc Prepay(PrepayRequest) returns (PayResultResponse);
+  rpc NotifyPayment(PaymentNotifyRequest) returns (google.protobuf.Empty);
+  rpc CreatePayment(CreatePaymentRequest) returns (PayResultResponse);
+  rpc QueryPayment(order.OrderNoRequest) returns (PayQueryResponse);
+  rpc QueryPayments(order.OrderNosRequest) returns (PayQueryListResponse);
+  rpc ClosePayment(order.OrderNoRequest) returns (google.protobuf.Empty);
+}
+
+message CreatePay {
+  string order_no = 1;
+  int64 user_id = 2;
+  int64 pay_amount = 3;
+  string pay_channel = 4;
+  string subject = 5;
+  google.protobuf.Timestamp expire_at = 6;
+}
+
+message PayResult {
+  string order_no = 1;
+  string pay_channel = 2;
+  string prepay_id = 3;
+  string nonce_str = 4;
+  string time_stamp = 5;
+  string sign = 6;
+}
+
+message PayQueryResult {
+  string order_no = 1;
+  int64 pay_status = 2;
+  string transaction_no = 3;
+  google.protobuf.Timestamp paid_at = 4;
+}
+
+message CreatePaymentRequest {
+  CreatePay request = 1;
+}
+
+message PrepayRequest {
+  int64 user_id = 1;
+  string order_no = 2;
+  string pay_channel = 3;
+}
+
+message PaymentNotifyRequest {
+  string channel = 1;
+  string order_no = 2;
+  string transaction_no = 3;
+  map<string, string> params = 4;
+}
+
+message PayResultResponse {
+  PayResult result = 1;
+}
+
+message PayQueryResponse {
+  PayQueryResult result = 1;
+}
+
+message PayQueryListResponse {
+  repeated PayQueryResult results = 1;
+}

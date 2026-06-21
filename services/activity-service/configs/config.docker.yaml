@@ -1,0 +1,52 @@
+services:
+  activity-service:
+    grpc:
+      addr: 0.0.0.0:9001
+
+data:
+  redis:
+    addr: redis:6379
+    password: ""
+    db: 0
+  postgres:
+    host: postgres
+    port: 5432
+    user: seckill
+    password: seckill123
+    database: seckill_activity
+
+discovery:
+  mode: etcd
+  etcd:
+    endpoints:
+      - etcd:2379
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - activity-service:9001
+  advertise:
+    activity-service: activity-service:9001
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: otel-collector:4317
+  insecure: true
+
+cache:
+  activity:
+    enabled: true
+    max_size: 512
+    local_ttl: 30m
+    refresh_after: 5s
+    redis_ttl: 30m
+    null_ttl: 60s
+    warmup_ahead: 10m
+    refresh_enabled: true
+    refresh_initial: 30s
+    refresh_tick: 60s

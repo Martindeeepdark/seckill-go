@@ -1,0 +1,31 @@
+# VCS
+.git
+.gitignore
+
+# Worktrees & IDE
+.worktrees
+.idea
+.vscode
+*.swp
+*.swo
+
+# Docs & process
+docs
+openspec
+*.md
+!README.md
+
+# Build artifacts
+*.exe
+*.test
+
+# Local configs (docker configs are kept)
+services/*/configs/config.yaml
+
+# Scripts & tooling
+scripts
+Makefile
+
+# OS
+.DS_Store
+Thumbs.db

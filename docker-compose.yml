@@ -1,0 +1,274 @@
+x-app-common: &app-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+
+services:
+  # ── Tier 0: 基础设施 ──────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: seckill
+      POSTGRES_USER: seckill
+      POSTGRES_PASSWORD: seckill123
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seckill"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+
+  nats:
+    image: nats:2-alpine
+    ports:
+      - "14222:4222"
+      - "18222:8222"
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    ports:
+      - "12379:2379"
+      - "12380:2380"
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd
+      -name etcd0
+      -advertise-client-urls http://etcd:2379
+      -listen-client-urls http://0.0.0.0:2379
+      -initial-advertise-peer-urls http://etcd:2380
+      -listen-peer-urls http://0.0.0.0:2380
+      -initial-cluster-token etcd-cluster
+      -initial-cluster etcd0=http://etcd:2380
+      -initial-cluster-state new
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  etcd-workbench:
+    image: tzfun/etcd-workbench:latest
+    ports:
+      - "18081:8002"
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+  # ── Tier 1: 叶服务（gRPC 服务端，仅依赖 redis）────────────
+  activity-service:
+    <<: *app-common
+    image: seckill/activity-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: activity-service
+    volumes:
+      - ./services/activity-service/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+    ports:
+      - "9001:9001"
+
+  stock-service:
+    <<: *app-common
+    image: seckill/stock-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: stock-service
+    volumes:
+      - ./services/stock-service/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+    ports:
+      - "9002:9002"
+
+  risk-service:
+    <<: *app-common
+    image: seckill/risk-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: risk-service
+    volumes:
+      - ./services/risk-service/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+    ports:
+      - "9003:9003"
+
+  order-service:
+    <<: *app-common
+    image: seckill/order-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: order-service
+    volumes:
+      - ./services/order-service/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+    ports:
+      - "9004:9004"
+
+  support-service:
+    <<: *app-common
+    image: seckill/support-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: support-service
+    volumes:
+      - ./services/support-service/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+    ports:
+      - "9005:9005"
+
+  # ── Tier 2: 消费者服务（依赖 Tier 1 gRPC 服务）────────────
+  seckill-gateway:
+    <<: *app-common
+    image: seckill/seckill-gateway:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: seckill-gateway
+    environment:
+      - SMOKE_NO_STOCK_PEEK=1
+    volumes:
+      - ./services/seckill-gateway/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+      activity-service:
+        condition: service_started
+      stock-service:
+        condition: service_started
+      risk-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      support-service:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
+  seckill-processor:
+    <<: *app-common
+    image: seckill/seckill-processor:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: seckill-processor
+    environment:
+      - SMOKE_NO_LIMIT=1
+    volumes:
+      - ./services/seckill-processor/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+      activity-service:
+        condition: service_started
+      stock-service:
+        condition: service_started
+      risk-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      support-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  seckill-job:
+    <<: *app-common
+    image: seckill/seckill-job:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: seckill-job
+    volumes:
+      - ./services/seckill-job/configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+      activity-service:
+        condition: service_started
+      stock-service:
+        condition: service_started
+      risk-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      support-service:
+        condition: service_started
+
+volumes:
+  go-cache:

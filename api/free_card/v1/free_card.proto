@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package seckill.api.free_card;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "api/common/v1/common.proto";
+
+option go_package = "seckill-api/free_card/v1;v1";
+
+service FreeCardService {
+  rpc IssueCard(IssueCardRequest) returns (CardNoResponse);
+  rpc GetCard(CardNoRequest) returns (FreeCardResponse);
+  rpc ListCards(common.UserIDRequest) returns (FreeCardListResponse);
+  rpc ActivateCard(ActivateCardRequest) returns (google.protobuf.Empty);
+  rpc FreezeCard(CardNoRequest) returns (google.protobuf.Empty);
+  rpc UnfreezeCard(CardNoRequest) returns (google.protobuf.Empty);
+}
+
+message IssueCard {
+  int64 user_id = 1;
+  string order_no = 2;
+  string card_name = 3;
+  int64 face_value = 4;
+  int64 valid_days = 5;
+}
+
+message FreeCard {
+  string card_no = 1;
+  string card_name = 2;
+  int64 face_value = 3;
+  int64 user_id = 4;
+  string order_no = 5;
+  int64 status = 6;
+  int64 valid_days = 7;
+  google.protobuf.Timestamp activated_at = 8;
+  google.protobuf.Timestamp expire_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message IssueCardRequest {
+  IssueCard request = 1;
+}
+
+message ActivateCardRequest {
+  string card_no = 1;
+  int64 user_id = 2;
+  string order_no = 3;
+}
+
+message CardNoRequest {
+  string card_no = 1;
+}
+
+message CardNoResponse {
+  string card_no = 1;
+}
+
+message FreeCardResponse {
+  FreeCard card = 1;
+}
+
+message FreeCardListResponse {
+  repeated FreeCard cards = 1;
+}

@@ -1,0 +1,61 @@
+services:
+  seckill-job:
+    grpc:
+      addr: ""
+
+data:
+  redis:
+    addr: redis:6379
+    password: ""
+    db: 0
+
+discovery:
+  mode: etcd
+  etcd:
+    endpoints:
+      - etcd:2379
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - activity-service:9001
+    stock-service:
+      - stock-service:9002
+    risk-service:
+      - risk-service:9003
+    order-service:
+      - order-service:9004
+    support-service:
+      - support-service:9005
+  advertise:
+    seckill-job: ""
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: otel-collector:4317
+  insecure: true
+
+job:
+  run_on_start: false
+  activity_status_check_interval: 1m
+  timeout_order_check_interval: 10m
+  stock_release_check_interval: 10m
+  activity_data_cleanup_interval: 24h
+  activity_data_retention: 24h
+  risk_user_cleanup_interval: 24h
+  daily_statistics_interval: 24h
+  cache_warmup_interval: 5m
+  cache_refresh_interval: 1m
+  cache_warmup_ahead: 10m
+  payment_reconcile_interval: 30m
+  order_sync_check_interval: 5m
+
+rpc:
+  timeout: 3s
+  circuit_breaker:
+    enabled: true

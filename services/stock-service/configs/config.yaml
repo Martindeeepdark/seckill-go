@@ -1,0 +1,38 @@
+services:
+  stock-service:
+    grpc:
+      addr: 0.0.0.0:9002
+
+data:
+  redis:
+    addr: 127.0.0.1:6379
+    password: ""
+    db: 0
+
+discovery:
+  mode: redis
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - 127.0.0.1:9001
+    stock-service:
+      - 127.0.0.1:9002
+    risk-service:
+      - 127.0.0.1:9003
+    order-service:
+      - 127.0.0.1:9004
+    support-service:
+      - 127.0.0.1:9005
+  advertise:
+    stock-service: 127.0.0.1:9002
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: 127.0.0.1:4317
+  insecure: true

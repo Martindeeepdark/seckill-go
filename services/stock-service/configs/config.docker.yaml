@@ -1,0 +1,41 @@
+services:
+  stock-service:
+    grpc:
+      addr: 0.0.0.0:9002
+
+data:
+  redis:
+    addr: redis:6379
+    password: ""
+    db: 0
+
+discovery:
+  mode: etcd
+  etcd:
+    endpoints:
+      - etcd:2379
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - activity-service:9001
+    stock-service:
+      - stock-service:9002
+    risk-service:
+      - risk-service:9003
+    order-service:
+      - order-service:9004
+    support-service:
+      - support-service:9005
+  advertise:
+    stock-service: stock-service:9002
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: otel-collector:4317
+  insecure: true

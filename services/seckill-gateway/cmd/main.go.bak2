@@ -1,0 +1,349 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	commonlogs "github.com/Martindeeepdark/go-common/logs"
+	goredis "github.com/redis/go-redis/v9"
+
+	commonconfig "seckill-common/config"
+	"seckill-common/discovery"
+	"seckill-common/logger"
+	"seckill-common/metrics"
+	"seckill-common/tracing"
+
+	"seckill-gateway-service/internal/application"
+	"seckill-gateway-service/internal/config"
+	"seckill-gateway-service/internal/infrastructure/cache"
+	"seckill-gateway-service/internal/infrastructure/entrystore"
+	"seckill-gateway-service/internal/infrastructure/gateway"
+	"seckill-gateway-service/internal/infrastructure/machinecheck"
+	"seckill-gateway-service/internal/infrastructure/queue"
+	"seckill-gateway-service/internal/server"
+	"seckill-gateway-service/internal/server/handler"
+)
+
+func main() {
+	configPath := "configs/config.yaml"
+	if len(os.Args) > 1 {
+		configPath = os.Args[1]
+	}
+	if err := start(configPath); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func start(configPath string) error {
+	ctx := context.Background()
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if err := logger.Init(cfg.Config); err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
+	defer logger.Sync()
+
+	commonlogs.Infof("starting %s on %s", cfg.ServiceName, cfg.HTTPAddr)
+
+	// 创建运行时动态配置容器
+	runtimeConfig := server.NewGatewayRuntimeConfig()
+	initRuntimeConfig(runtimeConfig, cfg.Gateway)
+
+	// 如果配置了 etcd，创建配置源并启动 watch
+	var etcdSource *commonconfig.EtcdConfigSource
+	if len(cfg.Etcd.Endpoints) > 0 {
+		etcdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		source, err := commonconfig.NewEtcdConfigSource(etcdCtx, cfg.Etcd.Endpoints, cfg.Etcd.Prefix)
+		cancel()
+		if err != nil {
+			log.Warn("etcd config source init failed, using YAML defaults", "err", err)
+		} else {
+			etcdSource = source
+			defer etcdSource.Close()
+
+			// 加载 etcd 配置并合并
+			loadCtx, loadCancel := context.WithTimeout(ctx, 3*time.Second)
+			etcdCfg, err := etcdSource.Load(loadCtx, "seckill-gateway")
+			loadCancel()
+			if err != nil {
+				log.Warn("etcd config load failed, using YAML defaults", "err", err)
+			} else if etcdCfg != nil {
+				applyEtcdConfig(runtimeConfig, etcdCfg)
+			}
+
+			// 启动 watch 协程
+			baseRaw, _ := config.LoadRaw(configPath)
+			go func() {
+				if err := etcdSource.Watch(ctx, "seckill-gateway", func(etcdCfg map[string]interface{}) {
+					if etcdCfg == nil {
+						// DELETE 事件：回退到 YAML 默认值
+						initRuntimeConfig(runtimeConfig, cfg.Gateway)
+						log.Info("config reverted to YAML defaults")
+						return
+					}
+					applyEtcdConfig(runtimeConfig, etcdCfg)
+					log.Info("config updated from etcd")
+				}); err != nil && ctx.Err() == nil {
+					log.Warn("etcd config watch stopped", "err", err)
+				}
+			}()
+			_ = baseRaw // base raw kept for reference
+		}
+	}
+
+	shutdownTrace := tracing.InitTracing(cfg.Config, log)
+	defer func() {
+		if err := shutdownTrace(ctx); err != nil {
+			log.Warn("shutdown tracing failed", "err", err)
+		}
+	}()
+
+	rpcDiscovery, err := discovery.NewRPCDiscovery(ctx, cfg.Config, log)
+	if err != nil {
+		return fmt.Errorf("init rpc discovery: %w", err)
+	}
+
+	clients, err := gateway.NewClients(ctx, gateway.RPCConfig{
+		Activity:              cfg.RPC.Activity,
+		Stock:                 cfg.RPC.Stock,
+		Risk:                  cfg.RPC.Risk,
+		Order:                 cfg.RPC.Order,
+		Payment:               cfg.RPC.Payment,
+		Timeout:               cfg.RPC.Timeout,
+		CircuitBreakerEnabled: cfg.RPC.CircuitBreakerEnabled,
+		Pool:                  cfg.RPC.Pool,
+	}, rpcDiscovery)
+	if err != nil {
+		return fmt.Errorf("create rpc clients: %w", err)
+	}
+	defer func() {
+		if err := clients.Close(); err != nil {
+			log.Warn("close rpc clients failed", "err", err)
+		}
+	}()
+
+	// 创建适配器
+	activityAdapter := gateway.NewActivityAdapter(clients.Activity)
+	stockAdapter := gateway.NewStockAdapter(clients.Stock)
+	riskAdapter := gateway.NewRiskAdapter(clients.Risk)
+	orderAdapter := gateway.NewOrderAdapter(clients.Order)
+	paymentAdapter := gateway.NewPaymentAdapter(clients.Payment)
+
+	// 用本地缓存包装 activity adapter，支撑高并发读路径。
+	// WorkerPool 和 SeckillApp 使用带缓存的版本；admin app 使用
+	// 原始 adapter，使直写（write-through）不被缓存延迟。
+	activityCache := cache.NewActivityCache(activityAdapter, cache.Config{
+		RefreshInterval: cfg.Gateway.Cache.RefreshInterval,
+		Detail: cache.EntryConfig{
+			LocalTTL:   cfg.Gateway.Cache.Detail.LocalTTL,
+			Shards:     cfg.Gateway.Cache.Detail.Shards,
+			MaxEntries: cfg.Gateway.Cache.Detail.MaxEntries,
+		},
+		List: cache.EntryConfig{
+			LocalTTL:   cfg.Gateway.Cache.List.LocalTTL,
+			Shards:     cfg.Gateway.Cache.List.Shards,
+			MaxEntries: cfg.Gateway.Cache.List.MaxEntries,
+		},
+	})
+	go activityCache.Start(ctx)
+
+	var publisher application.QueuePublisher = &queue.NopPublisher{}
+	switch strings.ToLower(cfg.MQ.Type) {
+	case "nats":
+		natsPub, err := queue.NewNATSPublisher(cfg.MQ, log)
+		if err != nil {
+			return fmt.Errorf("create nats publisher: %w", err)
+		}
+		publisher = natsPub
+		defer func() {
+			if err := natsPub.Close(); err != nil {
+				log.Warn("close nats publisher failed", "err", err)
+			}
+		}()
+	case "redis":
+		redisPub, err := queue.NewRedisPublisher(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, log)
+		if err != nil {
+			return fmt.Errorf("create redis publisher: %w", err)
+		}
+		publisher = redisPub
+		defer func() {
+			if err := redisPub.Close(); err != nil {
+				log.Warn("close redis publisher failed", "err", err)
+			}
+		}()
+	case "", "none", "memory":
+		log.Warn("seckill queue publisher disabled", "type", cfg.MQ.Type)
+	default:
+		log.Warn("unknown mq type, queue publisher disabled", "type", cfg.MQ.Type)
+	}
+
+	var resultStore application.ResultStore
+	var entryStore *entrystore.RedisStore
+	var resultRedis *goredis.Client
+	log.Info("redis config", "addr", cfg.RedisAddr, "db", cfg.RedisDB)
+	if cfg.RedisAddr != "" {
+		resultRedis = goredis.NewClient(&goredis.Options{
+			Addr:     cfg.RedisAddr,
+			Password: cfg.RedisPassword,
+			DB:       cfg.RedisDB,
+		})
+		defer func() {
+			if err := resultRedis.Close(); err != nil {
+				log.Warn("close result redis failed", "err", err)
+			}
+		}()
+		resultStore = queue.NewRedisResultStore(resultRedis)
+		entryStore = entrystore.NewRedisStore(resultRedis)
+		metrics.SetClient(resultRedis)
+		log.Info("metrics client initialized")
+	} else {
+		log.Warn("redis addr is empty, metrics will not be collected")
+	}
+
+	// 创建机验检查器
+	var checker application.MachineChecker = &application.NopMachineChecker{}
+	if cfg.Gateway.MachineCheck.Enabled {
+		switch strings.ToLower(cfg.Gateway.MachineCheck.Mode) {
+		case "hmac":
+			checker = application.NewHMMachineChecker(cfg.Gateway.MachineCheck)
+		case "", "java":
+			if resultRedis == nil {
+				return fmt.Errorf("java machine check requires redis")
+			}
+			checker = application.NewJavaMachineChecker(cfg.Gateway.MachineCheck, machinecheck.NewRedisStore(resultRedis))
+		default:
+			return fmt.Errorf("unsupported machine check mode: %s", cfg.Gateway.MachineCheck.Mode)
+		}
+	}
+
+	// Java gateway 在发布 MQ 前执行前置检查。
+	// 初始化 WorkerPool 用于快速路径处理：HTTP handler 异步提交事件，
+	// worker 在后台完成校验和发布。
+	workerCfg := application.DefaultWorkerPoolConfig()
+	workerCfg.QueueSize = 50000
+	workerCfg.WorkerCount = 200
+	workerPool := application.NewWorkerPool(
+		workerCfg,
+		activityCache,
+		riskAdapter,
+		stockAdapter,
+		publisher,
+		resultStore,
+		log,
+	)
+	workerPool.SetRiskCheckFunc(runtimeConfig.RiskEnabled)
+	// SMOKE_NO_STOCK_PEEK=1 时关闭 gateway 侧 stock 预检，压测场景释放 worker 吞吐
+	// （processor 的 DeductStockWithLimit 会原子检查并扣减，gateway 预检非必需）
+	if os.Getenv("SMOKE_NO_STOCK_PEEK") == "1" {
+		workerPool.SetStockPeekFunc(func() bool { return false })
+	}
+	go workerPool.Start(ctx)
+
+	// 创建应用层
+	seckillApp := application.NewSeckillApp(
+		cfg.Gateway,
+		activityCache,
+		stockAdapter,
+		riskAdapter,
+		orderAdapter,
+		publisher,
+		resultStore,
+		checker,
+		workerPool,
+		log,
+		application.WithUserRateLimiter(entryStore),
+		application.WithPipelineAcquirer(entryStore),
+		application.WithQueueStateStore(entryStore),
+		application.WithDynamicConfig(runtimeConfig),
+	)
+	paymentApp := application.NewPaymentApp(paymentAdapter, log)
+	adminActivityApp := application.NewActivityAdminApp(activityAdapter, log)
+	adminOrderApp := application.NewOrderAdminApp(orderAdapter, log)
+	adminStockApp := application.NewStockAdminApp(stockAdapter, log)
+
+	// 创建带动态中间件的 HTTP 服务
+	var middlewares []gin.HandlerFunc
+	middlewares = append(middlewares, server.DynamicRateLimitMiddleware(runtimeConfig))
+	middlewares = append(middlewares, server.DynamicDegradeMiddleware(runtimeConfig))
+	srv := server.NewHTTPServer(cfg.HTTPAddr, log, middlewares...)
+	srv.Register(handler.NewSeckillHandler(seckillApp))
+	srv.Register(handler.NewPaymentHandler(paymentApp))
+	adminHandler := handler.NewAdminHandler(adminActivityApp, adminOrderApp, adminStockApp).
+		WithConfigHandler(handler.NewConfigHandler(runtimeConfig, etcdSource))
+	srv.Register(adminHandler)
+
+	if err := srv.Start(); err != nil {
+		return fmt.Errorf("start http server: %w", err)
+	}
+	return nil
+}
+
+func rateLimitRules(rules []config.RateLimitRule) []server.RateLimitRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	result := make([]server.RateLimitRule, 0, len(rules))
+	for _, rule := range rules {
+		result = append(result, server.RateLimitRule{
+			Resource: rule.Resource,
+			Count:    rule.Count,
+			Interval: rule.Interval,
+		})
+	}
+	return result
+}
+
+// initRuntimeConfig 从静态配置初始化运行时配置
+func initRuntimeConfig(rc *server.GatewayRuntimeConfig, gw config.GatewayConfig) {
+	rc.UpdateRisk(gw.Risk.Enabled)
+	rc.UpdateMachineCheck(gw.MachineCheck.Enabled)
+	rc.UpdateRateLimit(gw.RateLimit.Enabled, server.RateLimitOptions{
+		MaxQPS:       gw.RateLimit.MaxQPS,
+		Rules:        rateLimitRules(gw.RateLimit.Rules),
+		UserEnabled:  gw.RateLimit.UserEnabled,
+		UserRate:     gw.RateLimit.UserRate,
+		UserInterval: gw.RateLimit.UserInterval,
+	})
+	rc.UpdateDegrade(server.DegradeOptions{
+		Enabled:          gw.Degrade.Enabled,
+		FailureThreshold: gw.Degrade.FailureThreshold,
+		Timeout:          gw.Degrade.Timeout,
+	})
+}
+
+// applyEtcdConfig 从 etcd 原始 map 更新运行时配置
+func applyEtcdConfig(rc *server.GatewayRuntimeConfig, raw map[string]interface{}) {
+	if v, ok := raw["risk"].(map[string]interface{}); ok {
+		if enabled, ok := v["enabled"].(bool); ok {
+			rc.UpdateRisk(enabled)
+		}
+	}
+	if v, ok := raw["machine_check"].(map[string]interface{}); ok {
+		if enabled, ok := v["enabled"].(bool); ok {
+			rc.UpdateMachineCheck(enabled)
+		}
+	}
+	if v, ok := raw["rate_limit"].(map[string]interface{}); ok {
+		enabled, _ := v["enabled"].(bool)
+		maxQPS, _ := v["max_qps"].(float64) // JSON numbers are float64
+		rc.UpdateRateLimit(enabled, server.RateLimitOptions{
+			MaxQPS: int(maxQPS),
+		})
+	}
+	if v, ok := raw["degrade"].(map[string]interface{}); ok {
+		enabled, _ := v["enabled"].(bool)
+		threshold, _ := v["failure_threshold"].(float64)
+		rc.UpdateDegrade(server.DegradeOptions{
+			Enabled:          enabled,
+			FailureThreshold: int(threshold),
+		})
+	}
+}

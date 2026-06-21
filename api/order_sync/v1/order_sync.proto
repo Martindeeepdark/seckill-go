@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package seckill.api.order_sync;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "api/common/v1/common.proto";
+import "api/order/v1/order.proto";
+
+option go_package = "seckill-api/order_sync/v1;v1";
+
+service OrderSyncService {
+  rpc SyncOrder(SyncOrderRequest) returns (google.protobuf.Empty);
+  rpc GetSyncedOrder(order.OrderNoRequest) returns (SyncedOrderResponse);
+  rpc ListSyncedOrdersByOrderNos(order.OrderNosRequest) returns (SyncedOrderListResponse);
+  rpc ListSyncedOrders(common.UserIDRequest) returns (SyncedOrderListResponse);
+}
+
+message SyncOrder {
+  string order_no = 1;
+  int64 user_id = 2;
+  string order_source = 3;
+  int64 total_amount = 4;
+  int64 discount_amount = 5;
+  int64 pay_amount = 6;
+  google.protobuf.Timestamp paid_at = 7;
+  string transaction_no = 8;
+}
+
+message SyncedOrder {
+  string order_no = 1;
+  int64 user_id = 2;
+  string order_source = 3;
+  int64 total_amount = 4;
+  int64 discount_amount = 5;
+  int64 pay_amount = 6;
+  int64 order_status = 7;
+  google.protobuf.Timestamp paid_at = 8;
+  google.protobuf.Timestamp completed_at = 9;
+  string transaction_no = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message SyncOrderRequest {
+  SyncOrder request = 1;
+}
+
+message SyncedOrderResponse {
+  SyncedOrder order = 1;
+}
+
+message SyncedOrderListResponse {
+  repeated SyncedOrder orders = 1;
+}

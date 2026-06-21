@@ -1,0 +1,34 @@
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: "127.0.0.1:4317"
+  insecure: true
+
+server:
+  grpc:
+    addr: "127.0.0.1:9003"
+
+data:
+  redis:
+    addr: "127.0.0.1:6379"
+    password: ""
+    db: 0
+
+black_list:
+  enabled: true
+  mark_start_before: "300s"
+  mark_end_before: "10s"
+  expire_after: "300s"
+
+risk:
+  high_risk_threshold: 10
+  risk_user_ttl: "24h"
+  recent_window: "1h"
+  high_risk_window: "24h"
+  cache:
+    risk:
+      local_ttl: 60s
+      shards: 16
+      max_entries: 2048

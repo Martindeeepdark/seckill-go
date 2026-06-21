@@ -1,0 +1,61 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: false
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - unused
+    - ineffassign
+    - gosec
+    - nilerr
+    - nilnil
+    - unconvert
+    - unparam
+    - wrapcheck
+    - nolintlint
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - (io.Closer).Close
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes: seckill
+    goconst:
+      min-len: 2
+      min-occurrences: 3
+      match-constant: false
+      numbers: false
+      ignore-calls: false
+
+issues:
+  new: true
+  new-from-rev: origin/main
+  exclude-dirs:
+    - vendor
+    - third_party
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    - path: cmd/
+      linters:
+        - gochecknoinits
+    - linters:
+        - revive
+      text: "don't use an underscore in package name"
+  max-issues-per-linter: 50
+  max-same-issues: 3

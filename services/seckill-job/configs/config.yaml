@@ -1,0 +1,58 @@
+services:
+  seckill-job:
+    grpc:
+      addr: ""
+
+data:
+  redis:
+    addr: 127.0.0.1:6379
+    password: ""
+    db: 0
+
+discovery:
+  mode: redis
+  namespace: seckill
+  static_fallback: true
+  ttl: 15s
+  refresh_interval: 5s
+  services:
+    activity-service:
+      - 127.0.0.1:9001
+    stock-service:
+      - 127.0.0.1:9002
+    risk-service:
+      - 127.0.0.1:9003
+    order-service:
+      - 127.0.0.1:9004
+    support-service:
+      - 127.0.0.1:9005
+  advertise:
+    seckill-job: ""
+
+log:
+  level: info
+
+trace:
+  enabled: false
+  endpoint: 127.0.0.1:4317
+  insecure: true
+
+job:
+  run_on_start: true
+  activity_status_check_interval: 1m
+  timeout_order_check_interval: 10m
+  stock_release_check_interval: 10m
+  activity_data_cleanup_interval: 24h
+  activity_data_retention: 24h
+  risk_user_cleanup_interval: 24h
+  daily_statistics_interval: 24h
+  cache_warmup_interval: 5m
+  cache_refresh_interval: 1m
+  cache_warmup_ahead: 10m
+  payment_reconcile_interval: 30m
+  order_sync_check_interval: 5m
+
+rpc:
+  timeout: 3s
+  circuit_breaker:
+    enabled: true

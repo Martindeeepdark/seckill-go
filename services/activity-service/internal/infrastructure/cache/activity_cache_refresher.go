@@ -1,0 +1,191 @@
+// Package cache 提供活动缓存的自动刷新功能。
+package cache
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
+
+	commonredis "github.com/Martindeeepdark/go-common/cache/redis"
+
+	"seckill-common/rediskeys"
+
+	"seckill-activity-service/internal/application"
+	"seckill-activity-service/internal/config"
+	domain "seckill-activity-service/internal/domain/entity"
+	"seckill-activity-service/internal/domain/status"
+)
+
+// ActivityCacheRefresher 自动预热和刷新活动缓存。
+type ActivityCacheRefresher struct {
+	source ActivityGateway
+	client *commonredis.Client
+	cfg    config.ActivityCacheConfig
+	logger *slog.Logger
+}
+
+// NewActivityCacheRefresher 创建缓存刷新器，仅当启用 Redis 和刷新配置时生效。
+func NewActivityCacheRefresher(ctx context.Context, cfg config.Config, source ActivityGateway, logger *slog.Logger) (*ActivityCacheRefresher, func() error) {
+	if source == nil || !cfg.Cache.Activity.Enabled || !cfg.Cache.Activity.RefreshEnabled || cfg.RedisAddr == "" {
+		return nil, func() error { return nil }
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	client := commonredis.New(cfg.RedisAddr, commonredis.WithPassword(cfg.RedisPassword), commonredis.WithDB(cfg.RedisDB))
+	if err := client.Redis().Ping(ctx).Err(); err != nil {
+		logger.Warn("activity cache refresher redis unavailable", "addr", cfg.RedisAddr, "error", err)
+		_ = client.Close() //nolint:errcheck // best-effort cleanup
+		return nil, func() error { return nil }
+	}
+	refresher := &ActivityCacheRefresher{
+		source: source,
+		client: client,
+		cfg:    normalizeActivityCacheConfig(cfg.Cache.Activity),
+		logger: logger,
+	}
+	return refresher, client.Close
+}
+
+// Run 启动定时刷新任务，阻塞运行直到上下文取消。
+func (r *ActivityCacheRefresher) Run(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	if r.cfg.RefreshInitial > 0 {
+		timer := time.NewTimer(r.cfg.RefreshInitial)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("refresher context cancelled: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+
+	if err := r.Refresh(ctx); err != nil && r.logger != nil {
+		r.logger.Warn("activity cache refresh failed", "error", err)
+	}
+
+	ticker := time.NewTicker(r.cfg.RefreshTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("refresher context cancelled: %w", ctx.Err())
+		case <-ticker.C:
+			if err := r.Refresh(ctx); err != nil && r.logger != nil {
+				r.logger.Warn("activity cache refresh failed", "error", err)
+			}
+		}
+	}
+}
+
+// Refresh 执行一次完整的缓存刷新，包括预热和刷新进行中活动。
+func (r *ActivityCacheRefresher) Refresh(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	activities, err := r.source.ListActivities(ctx)
+	if err != nil {
+		return fmt.Errorf("refresh activities cache: %w", err)
+	}
+	targets, active := selectWarmupActivities(activities, time.Now(), r.cfg.WarmupAhead)
+	for _, activity := range targets {
+		if err := r.WarmupActivity(ctx, activity); err != nil && r.logger != nil {
+			r.logger.Warn("activity cache warmup failed", "activityNo", activity.ActivityNo, "error", err)
+		}
+	}
+	if err := r.RefreshActiveActivities(ctx, active); err != nil {
+		return err
+	}
+	if r.logger != nil {
+		r.logger.Info("activity cache refreshed", "warmupCount", len(targets), "activeCount", len(active))
+	}
+	return nil
+}
+
+// WarmupActivity 预热活动及其库存到 Redis。
+func (r *ActivityCacheRefresher) WarmupActivity(ctx context.Context, activity domain.Activity) error {
+	if r == nil {
+		return nil
+	}
+	if err := r.RefreshActivity(ctx, activity); err != nil {
+		return err
+	}
+	for _, sku := range activity.SKUs {
+		if sku.TotalStock <= 0 {
+			continue
+		}
+		if err := r.client.Redis().SetNX(ctx, activityStockKey(activity.ActivityNo, sku.SKUNo), sku.TotalStock, r.cfg.RedisTTL).Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RefreshActivity 刷新单个活动的缓存数据。
+func (r *ActivityCacheRefresher) RefreshActivity(ctx context.Context, activity domain.Activity) error {
+	if r == nil {
+		return nil
+	}
+	// 序列化活动（通过DTO）
+	dto := application.ToActivityDTO(activity)
+	payload, err := json.Marshal(dto)
+	if err != nil {
+		return err
+	}
+	if err := r.client.Redis().Set(ctx, activityInfoKeyPrefix+activity.ActivityNo, string(payload), r.cfg.RedisTTL).Err(); err != nil {
+		return err
+	}
+	if len(activity.SKUs) > 0 {
+		// 序列化SKU列表（通过DTO）
+		skuDtos := application.ToSKUListDTO(activity.SKUs)
+		payload, err := json.Marshal(skuDtos)
+		if err != nil {
+			return err
+		}
+		if err := r.client.Redis().Set(ctx, activityProductKeyPrefix+activity.ActivityNo, string(payload), r.cfg.RedisTTL).Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RefreshActiveActivities 刷新进行中活动列表。
+func (r *ActivityCacheRefresher) RefreshActiveActivities(ctx context.Context, activities []domain.Activity) error {
+	if r == nil {
+		return nil
+	}
+	// 序列化活动列表（通过DTO）
+	dtos := application.ToActivityDTOList(activities)
+	payload, err := json.Marshal(dtos)
+	if err != nil {
+		return err
+	}
+	return r.client.Redis().Set(ctx, activeActivityListKey, string(payload), r.cfg.RedisTTL).Err()
+}
+
+// selectWarmupActivities 选择需要预热的活动（进行中和即将开始）和进行中活动。
+func selectWarmupActivities(activities []domain.Activity, now time.Time, warmupAhead time.Duration) ([]domain.Activity, []domain.Activity) {
+	deadline := now.Add(warmupAhead)
+	targets := make([]domain.Activity, 0, len(activities))
+	active := make([]domain.Activity, 0, len(activities))
+	for _, activity := range activities {
+		if activity.Status == status.ActivityOpen && !now.Before(activity.StartTime) && now.Before(activity.EndTime) {
+			targets = append(targets, activity)
+			active = append(active, activity)
+			continue
+		}
+		if activity.Status == status.ActivityPending && activity.StartTime.After(now) && !activity.StartTime.After(deadline) {
+			targets = append(targets, activity)
+		}
+	}
+	return targets, active
+}
+
+// activityStockKey 返回活动库存的 Redis 键。
+func activityStockKey(activityNo, skuNo string) string {
+	return rediskeys.ProductSKUStock(activityNo, skuNo)
+}
