@@ -47,7 +47,7 @@ test:
 build:
 	@for mod in $(ALL_MODULES); do \
 		echo "==> $$mod"; \
-		(cd $$mod && go build ./...); \
+		(cd $$mod && go mod tidy && go build ./...); \
 	done
 
 # ── Lint ─────────────────────────────────────────────────────

@@ -36,14 +36,6 @@ jobs:
     - name: Generate proto files
       run: make api
 
-    - name: Download dependencies
-      run: |
-        cd api && go mod download && go mod tidy
-        cd ../common && go mod download && go mod tidy
-        for dir in services/*/; do
-          (cd "$dir" && go mod download && go mod tidy)
-        done
-
     - name: Build services
       run: make build
 
