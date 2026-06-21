@@ -8,7 +8,7 @@ replace (
 )
 
 require (
-	github.com/Martindeeepdark/go-common v0.0.0-20260621125950-44fa310e1cf9
+	github.com/Martindeeepdark/go-common v0.1.0
 	github.com/nats-io/nats.go v1.52.0
 	github.com/redis/go-redis/v9 v9.20.0
 	go.uber.org/zap v1.27.1
