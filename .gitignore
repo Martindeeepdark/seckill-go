@@ -21,3 +21,7 @@
 docs/superpowers/
 openspec/
 .comet.yaml
+
+# Go workspace (local development only)
+go.work
+go.work.sum
